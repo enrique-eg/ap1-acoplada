@@ -1,17 +1,13 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: ap1-acoplada-dynamodb - EC2 + ALB + API Gateway + DynamoDB (AWS Academy sin IAM)
+Description: ap1-acoplada-nlb - EC2 + NLB + API Gateway + DynamoDB (AWS Academy compatible)
 
 Resources:
-  # === VPC y Subredes ===
   VPC:
     Type: AWS::EC2::VPC
     Properties:
       CidrBlock: 10.0.0.0/16
       EnableDnsSupport: true
       EnableDnsHostnames: true
-      Tags:
-        - Key: Name
-          Value: ap1-vpc
 
   InternetGateway:
     Type: AWS::EC2::InternetGateway
@@ -22,7 +18,7 @@ Resources:
       VpcId: !Ref VPC
       InternetGatewayId: !Ref InternetGateway
 
-  PublicSubnet1:
+  PublicSubnet:
     Type: AWS::EC2::Subnet
     Properties:
       VpcId: !Ref VPC
@@ -30,15 +26,7 @@ Resources:
       MapPublicIpOnLaunch: true
       AvailabilityZone: !Select [0, !GetAZs ""]
 
-  PublicSubnet2:
-    Type: AWS::EC2::Subnet
-    Properties:
-      VpcId: !Ref VPC
-      CidrBlock: 10.0.2.0/24
-      MapPublicIpOnLaunch: true
-      AvailabilityZone: !Select [1, !GetAZs ""]
-
-  PublicRouteTable:
+  RouteTable:
     Type: AWS::EC2::RouteTable
     Properties:
       VpcId: !Ref VPC
@@ -46,23 +34,16 @@ Resources:
   PublicRoute:
     Type: AWS::EC2::Route
     Properties:
-      RouteTableId: !Ref PublicRouteTable
+      RouteTableId: !Ref RouteTable
       DestinationCidrBlock: 0.0.0.0/0
       GatewayId: !Ref InternetGateway
 
-  SubnetRouteTable1:
+  SubnetRouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
-      SubnetId: !Ref PublicSubnet1
-      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnet
+      RouteTableId: !Ref RouteTable
 
-  SubnetRouteTable2:
-    Type: AWS::EC2::SubnetRouteTableAssociation
-    Properties:
-      SubnetId: !Ref PublicSubnet2
-      RouteTableId: !Ref PublicRouteTable
-
-  # === DynamoDB ===
   DynamoDBTable:
     Type: AWS::DynamoDB::Table
     Properties:
@@ -75,17 +56,12 @@ Resources:
           KeyType: HASH
       BillingMode: PAY_PER_REQUEST
 
-  # === Security Group ===
   SGEC2:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Security group for EC2 and ALB
+      GroupDescription: Security group for EC2 and NLB
       VpcId: !Ref VPC
       SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 80
-          ToPort: 80
-          CidrIp: 0.0.0.0/0
         - IpProtocol: tcp
           FromPort: 8000
           ToPort: 8000
@@ -94,58 +70,52 @@ Resources:
         - IpProtocol: -1
           CidrIp: 0.0.0.0/0
 
-  # === EC2 ===
   EC2Instance:
     Type: AWS::EC2::Instance
     Properties:
       InstanceType: t3.micro
       ImageId: ami-0c2b8ca1dad447f8a
       SecurityGroupIds: [!Ref SGEC2]
-      SubnetId: !Ref PublicSubnet1
+      SubnetId: !Ref PublicSubnet
       UserData:
         Fn::Base64: !Sub |
-        #!/bin/bash
-        yum update -y
-        yum install -y python3-pip git
-        cd /home/ec2-user
-        git clone https://github.com/enrique-eg/ap1-acoplada.git
-        cd ap1-acoplada
-        pip3 install --upgrade pip
-        pip3 install -r requirements.txt
-        nohup gunicorn -b 0.0.0.0:8000 app:app > app.log 2>&1 &
+          #!/bin/bash
+          yum update -y
+          yum install -y python3-pip git awscli
+          cd /home/ec2-user
+          git clone https://github.com/enrique-eg/ap1-acoplada.git
+          cd ap1-acoplada
+          pip3 install --upgrade pip
+          pip3 install -r requirements.txt
+          nohup gunicorn -c gunicorn_config.py app:app > app.log 2>&1 &
+          INSTANCE_ID=$(curl -s http://169.254.169.254/latest/meta-data/instance-id)
+          aws elbv2 register-targets --target-group-arn ${TargetGroup} --targets Id=$INSTANCE_ID --region us-east-1
 
-
-  # === Application Load Balancer ===
-  ALB:
+  NLB:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
     Properties:
+      Type: network
+      Subnets: [!Ref PublicSubnet]
       Scheme: internet-facing
-      Subnets:
-        - !Ref PublicSubnet1
-        - !Ref PublicSubnet2
-      SecurityGroups: [!Ref SGEC2]
 
   TargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
-      Name: ap1-target-group
       Port: 8000
-      Protocol: HTTP
+      Protocol: TCP
       TargetType: instance
       VpcId: !Ref VPC
-      HealthCheckPath: /health
 
   Listener:
     Type: AWS::ElasticLoadBalancingV2::Listener
     Properties:
-      LoadBalancerArn: !Ref ALB
-      Port: 80
-      Protocol: HTTP
+      LoadBalancerArn: !Ref NLB
+      Port: 8000
+      Protocol: TCP
       DefaultActions:
         - Type: forward
           TargetGroupArn: !Ref TargetGroup
 
-  # === API Gateway ===
   APIGateway:
     Type: AWS::ApiGatewayV2::Api
     Properties:
@@ -158,7 +128,7 @@ Resources:
       ApiId: !Ref APIGateway
       IntegrationType: HTTP_PROXY
       IntegrationMethod: ANY
-      IntegrationUri: !Sub "http://${ALB.DNSName}"
+      IntegrationUri: !Sub "http://${NLB.DNSName}:8000"
       PayloadFormatVersion: '1.0'
 
   Route:
@@ -179,6 +149,6 @@ Outputs:
   ApiURL:
     Description: Public URL of the API Gateway
     Value: !Sub "https://${APIGateway}.execute-api.${AWS::Region}.amazonaws.com/prod"
-  ALBURL:
-    Description: Public URL of the Load Balancer
-    Value: !Sub "http://${ALB.DNSName}"
+  NLBEndpoint:
+    Description: Public DNS of the Network Load Balancer
+    Value: !Sub "http://${NLB.DNSName}:8000"

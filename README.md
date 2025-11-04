@@ -1,15 +1,17 @@
-# ap1-acoplada-dynamo
+# ap1-acoplada-nlb (AWS Academy Compatible)
 
-## 🚀 Descripción
-Versión acoplada con **DynamoDB + API Gateway + ALB + EC2**.
-Cumple los requisitos de la práctica AWS Cloud.
+## Arquitectura
+API Gateway → NLB → EC2 (Flask + Gunicorn) → DynamoDB
 
-## ⚙️ Despliegue
-1. Abre **AWS Academy → CloudFormation**.
-2. Create stack → "With new resources".
-3. Sube `cloudformation.yaml`.
-4. Espera 10 minutos.
+## Despliegue
+1. Sube este proyecto a GitHub (https://github.com/enrique-eg/ap1-acoplada).
+2. Sube `cloudformation.yaml` a AWS CloudFormation.
+3. Espera hasta que el estado sea CREATE_COMPLETE.
+4. Prueba el endpoint en `Outputs > ApiURL`.
 
-## 🌐 Prueba
-1. Ve a *Outputs*.
-2. Abre la URL `ApiURL` → mostrará tu interfaz CRUD.
+## Endpoints CRUD
+- GET /items
+- POST /items
+- GET /items/<id>
+- PUT /items/<id>
+- DELETE /items/<id>
