@@ -104,14 +104,16 @@ Resources:
       SubnetId: !Ref PublicSubnet1
       UserData:
         Fn::Base64: !Sub |
-          #!/bin/bash
-          yum update -y
-          yum install -y python3 git
-          cd /home/ec2-user
-          git clone https://github.com/enrique-eg/ap1-acoplada.git
-          cd ap1-acoplada
-          pip3 install -r requirements.txt
-          nohup gunicorn -c gunicorn_config.py app:app &
+        #!/bin/bash
+        yum update -y
+        yum install -y python3-pip git
+        cd /home/ec2-user
+        git clone https://github.com/enrique-eg/ap1-acoplada.git
+        cd ap1-acoplada
+        pip3 install --upgrade pip
+        pip3 install -r requirements.txt
+        nohup gunicorn -b 0.0.0.0:8000 app:app > app.log 2>&1 &
+
 
   # === Application Load Balancer ===
   ALB:
