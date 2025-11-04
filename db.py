@@ -1,22 +1,32 @@
-import os
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from models import Base
+import boto3
+import uuid
 
-# Configuración base de datos
-DB_HOST = os.environ.get("DB_HOST")
-DB_PORT = os.environ.get("DB_PORT", "5432")
-DB_NAME = os.environ.get("DB_NAME")
-DB_USER = os.environ.get("DB_USER")
-DB_PASS = os.environ.get("DB_PASS")
+region = "us-east-1"
+table_name = "ap1-items"
+dynamodb = boto3.resource("dynamodb", region_name=region)
+table = dynamodb.Table(table_name)
 
-if DB_HOST and DB_NAME and DB_USER and DB_PASS:
-    DATABASE_URL = f"postgresql+psycopg2://{DB_USER}:{DB_PASS}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
-else:
-    DATABASE_URL = "sqlite:///./test.db"
+def create_item(nombre, precio, categoria):
+    item_id = str(uuid.uuid4())
+    table.put_item(Item={
+        "id": item_id,
+        "nombre": nombre,
+        "precio": precio,
+        "categoria": categoria
+    })
+    return item_id
 
-engine = create_engine(DATABASE_URL, pool_pre_ping=True)
-SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+def get_item(item_id):
+    return table.get_item(Key={"id": item_id}).get("Item")
 
-def init_db():
-    Base.metadata.create_all(bind=engine)
+def list_items():
+    return table.scan().get("Items", [])
+
+def update_item(item_id, data):
+    update_expr = "SET " + ", ".join([f"{k}=:{k}" for k in data])
+    expr_vals = {f":{k}": v for k, v in data.items()}
+    table.update_item(Key={"id": item_id}, UpdateExpression=update_expr,
+                      ExpressionAttributeValues=expr_vals)
+
+def delete_item(item_id):
+    table.delete_item(Key={"id": item_id})
